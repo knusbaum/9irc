@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/user"
 	"strings"
 	"syscall"
 	"time"
@@ -63,17 +65,32 @@ func getFile(channel string) *os.File {
 	return f
 }
 
-//ircobj.SendRaw("<string>") //sends string to server. Adds \r\n
-//ircobj.SendRawf("<formatstring>", ...) //sends formatted string to server.n
-//ircobj.Join("<#channel> [password]")
-//ircobj.Nick("newnick")
-//ircobj.Privmsg("<nickname | #channel>", "msg") // sends a message to either a certain nick or a channel
-//ircobj.Privmsgf(<nickname | #channel>, "<formatstring>", ...)
-//ircobj.Notice("<nickname | #channel>", "msg")
-//ircobj.Noticef("<nickname | #channel>", "<formatstring>", ...)
-
 func main() {
-	err := os.MkdirAll(dir, os.ModeDir|0775)
+	var username string
+	u, err := user.Current()
+	if err == nil {
+		username = u.Username
+	}
+	
+	dirFlag := flag.String("dir", "/tmp/9irc", "specifies the directory to which 9irc will write irc messages.")
+	nick := flag.String("nick", "", "the nick that will be used.")
+	user := flag.String("user", username, "the username to log into the server with.")
+	server := flag.String("server", "chat.freenode.net:6697", "address (host and port) of the IRC server to connect to.")
+	flag.Parse()
+
+	dir = *dirFlag
+	if *nick == "" {
+		log.Print("nick not provided.")
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *user == "" {
+		log.Print("user not provided.")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	err = os.MkdirAll(dir, os.ModeDir|0775)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -82,19 +99,16 @@ func main() {
 	ircobj := irc.IRC("testclient2", "jack_rabbit") //Create new ircobj
 	ircobj.VerboseCallbackHandler = true
 	ircobj.Log = verboseLog()
-	//Set options
 	ircobj.UseTLS = true //default is false
-	ircobj.AddCallback("001", func(e *irc.Event) {
+//	ircobj.AddCallback("001", func(e *irc.Event) {
+		//ircobj.Join("##client.test.1")
+		//go listener(msgs)
+		//go handleOutgoing(ircobj, msgs)
+//	})
+//	ircobj.AddCallback("366", func(e *irc.Event) {
 		//fmt.Printf("Event: %#v\n", e)
-		ircobj.Join("##client.test.1")
-		go listener(msgs)
-		go handleOutgoing(ircobj, msgs)
-	})
-	ircobj.AddCallback("366", func(e *irc.Event) {
-		//fmt.Printf("Event: %#v\n", e)
-	})
+//	})
 	ircobj.AddCallback("PRIVMSG", func(e *irc.Event) {
-		//fmt.Printf("PRIVMSG: %#v\n", e)
 		channel := e.Arguments[0]
 		f := getFile(channel)
 		f.Write([]byte(fmt.Sprintf("[%s] %s: %s\n", time.Now().Format("01/02 03:04PM"), e.Nick, e.Arguments[1])))
@@ -104,22 +118,18 @@ func main() {
 		f := getFile(channel)
 		f.Write([]byte(fmt.Sprintf("[%s] %s Joined %s\n", time.Now().Format("01/02 03:04PM"), e.Nick, channel)))
 	})
-//	ircobj.AddCallback("PING", func(e *irc.Event) {
-//		ircobj.Pong()
-//	})
 	ircobj.AddCallback("*", func(e *irc.Event) {
-		//fmt.Printf("ALLEvent: %#v\n", e)
 		raw.Write([]byte(e.Raw + "\n"))
 	})
-	err = ircobj.Connect("chat.freenode.net:6697") //Connect to server
+	err = ircobj.Connect(*server) //Connect to server
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	//go pipeListener()
 
-	//go listener(msgs)
-	//go handleOutgoing(ircobj, msgs)
+	go listener(msgs)
+	go handleOutgoing(ircobj, msgs)
 	ircobj.Loop()
 }
 
@@ -213,7 +223,7 @@ func parseIncoming(in string) (o outgoing, e error) {
 			return
 		}
 		o.target = parts[1]
-			
+
 	default:
 		e = fmt.Errorf("Invalid command %s.", parts[0])
 	}
