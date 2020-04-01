@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/user"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/thoj/go-ircevent"
@@ -20,6 +17,7 @@ type otype int
 const (
 	MSG otype = iota
 	JOIN
+	PART
 	NICK
 )
 
@@ -71,7 +69,7 @@ func main() {
 	if err == nil {
 		username = u.Username
 	}
-	
+
 	dirFlag := flag.String("dir", "/tmp/9irc", "specifies the directory to which 9irc will write irc messages.")
 	nick := flag.String("nick", "", "the nick that will be used.")
 	user := flag.String("user", username, "the username to log into the server with.")
@@ -100,14 +98,14 @@ func main() {
 	ircobj.VerboseCallbackHandler = true
 	ircobj.Log = verboseLog()
 	ircobj.UseTLS = true //default is false
-//	ircobj.AddCallback("001", func(e *irc.Event) {
-		//ircobj.Join("##client.test.1")
-		//go listener(msgs)
-		//go handleOutgoing(ircobj, msgs)
-//	})
-//	ircobj.AddCallback("366", func(e *irc.Event) {
-		//fmt.Printf("Event: %#v\n", e)
-//	})
+	//	ircobj.AddCallback("001", func(e *irc.Event) {
+	//		ircobj.Join("##client.test.1")
+	//		go listener(msgs)
+	//		go handleOutgoing(ircobj, msgs)
+	//	})
+	//	ircobj.AddCallback("366", func(e *irc.Event) {
+	//		fmt.Printf("Event: %#v\n", e)
+	//	})
 	ircobj.AddCallback("PRIVMSG", func(e *irc.Event) {
 		channel := e.Arguments[0]
 		f := getFile(channel)
@@ -126,76 +124,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//go pipeListener()
-
 	go listener(msgs)
 	go handleOutgoing(ircobj, msgs)
 	ircobj.Loop()
-}
-
-func pipeListener() {
-	os.Remove(dir + "/ctl")
-	err := syscall.Mkfifo(dir+"/ctl", 0664)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for {
-		f, err := os.Open(dir + "/ctl")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		fmt.Println("Scanning")
-		for scanner.Scan() {
-			fmt.Println("Received scan.")
-			fmt.Println(scanner.Text()) // Println will add back the final '\n'
-		}
-		fmt.Println("Finished Scanning.")
-		if err := scanner.Err(); err != nil {
-			//log.Fatal(err)
-			fmt.Fprintln(os.Stderr, "reading standard input:", err)
-		}
-	}
-}
-
-func listener(msgs chan<- outgoing) {
-	os.Remove(dir + "/ctl")
-	l, err := net.Listen("unix", dir+"/ctl")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer l.Close()
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		go handleConn(conn, msgs)
-	}
-}
-
-func handleConn(c net.Conn, msgs chan<- outgoing) {
-	scanner := bufio.NewScanner(c)
-	for scanner.Scan() {
-		fmt.Println(scanner.Text()) // Println will add back the final '\n'
-		c.Write([]byte(fmt.Sprintf("Got: [%s]\n", scanner.Text())))
-		out, err := parseIncoming(scanner.Text())
-		if err != nil {
-			c.Write([]byte(fmt.Sprintf("%s\n", err)))
-			continue
-		}
-		select {
-		case msgs <- out:
-		default:
-		}
-		c.Write([]byte(fmt.Sprintf("%#v\n", out)))
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading standard input:", err)
-	}
 }
 
 func parseIncoming(in string) (o outgoing, e error) {
@@ -216,6 +147,13 @@ func parseIncoming(in string) (o outgoing, e error) {
 			return
 		}
 		o.target = parts[1]
+	case "part":
+		o.t = PART
+		if len(parts) != 2 {
+			e = fmt.Errorf("Usage: part [target]")
+			return
+		}
+		o.target = parts[1]
 	case "nick":
 		o.t = NICK
 		if len(parts) != 2 {
@@ -223,7 +161,6 @@ func parseIncoming(in string) (o outgoing, e error) {
 			return
 		}
 		o.target = parts[1]
-
 	default:
 		e = fmt.Errorf("Invalid command %s.", parts[0])
 	}
@@ -236,6 +173,9 @@ func handleOutgoing(ircobj *irc.Connection, out <-chan outgoing) {
 		case JOIN:
 			ircobj.Join(o.target)
 			fmt.Printf("Joining [%s]\n", o.target)
+		case PART:
+			ircobj.Part(o.target)
+			fmt.Printf("Parting [%s]\n", o.target)
 		case MSG:
 			ircobj.Privmsg(o.target, o.msg)
 			fmt.Printf("Sending [%s] -> [%s]\n", o.msg, o.target)
