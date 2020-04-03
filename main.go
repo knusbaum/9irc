@@ -1,16 +1,24 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
 	"strings"
 	"time"
 
+	"github.com/knusbaum/go9p"
+	"github.com/knusbaum/go9p/fs"
 	"github.com/thoj/go-ircevent"
 )
+
+var dir string = "/tmp/9irc"
+var ircFS *fs.FS
+var streams map[string]fs.Stream
 
 type otype int
 
@@ -27,40 +35,47 @@ type outgoing struct {
 	msg    string
 }
 
-var dir string = "/tmp/9irc"
-
 func verboseLog() *log.Logger {
-	f, err := os.OpenFile(dir+"/log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return log.New(f, "", log.LstdFlags)
-}
-func rawFile() *os.File {
-	f, err := os.OpenFile(dir+"/raw", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return f
+	s := getFile("log")
+	return log.New(s, "", log.LstdFlags)
 }
 
-var fhandles map[string]*os.File
-
-func getFile(channel string) *os.File {
-	if fhandles == nil {
-		fhandles = make(map[string]*os.File)
+func getFile(channel string) fs.Stream {
+	if streams == nil {
+		streams = make(map[string]fs.Stream)
 	}
-	f := fhandles[channel]
-	if f == nil {
+	s := streams[channel]
+	if s == nil {
 		var err error
-		f, err = os.OpenFile(dir+"/"+channel, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
+		f, err := os.OpenFile(dir+"/"+channel, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
 		if err != nil {
 			// TODO: Probably shouldn't be fatal in the long run
 			log.Fatal(err)
 		}
-		fhandles[channel] = f
+		f.Close()
+		s, err = fs.NewSavedStream(dir + "/" + channel)
+		if err != nil {
+			log.Fatal(err)
+		}
+		streams[channel] = s
+		ircFS.Root.AddChild(
+			fs.NewStreamFile(
+				ircFS.NewStat(channel, "glenda", "glenda", 0444),
+				s,
+			),
+		)
 	}
-	return f
+	return s
+}
+
+func setupStreams() {
+	infos, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, info := range infos {
+		getFile(info.Name())
+	}
 }
 
 func main() {
@@ -70,13 +85,17 @@ func main() {
 		username = u.Username
 	}
 
-	dirFlag := flag.String("dir", "/tmp/9irc", "specifies the directory to which 9irc will write irc messages.")
+	dirFlag := flag.String("dir", "", "specifies the directory to which 9irc will log irc messages. (default \"/tmp/9irc\")")
 	nick := flag.String("nick", "", "the nick that will be used.")
 	user := flag.String("user", username, "the username to log into the server with.")
 	server := flag.String("server", "chat.freenode.net:6697", "address (host and port) of the IRC server to connect to.")
+	service := flag.String("svc", "9irc", "sets the service name that the 9p connection will be posted as. This will also change the log directory to /tmp/[svc] unless it is set with the dir flag.")
 	flag.Parse()
 
-	dir = *dirFlag
+	dir = "/tmp/" + *service
+	if *dirFlag != "" {
+		dir = *dirFlag
+	}
 	if *nick == "" {
 		log.Print("nick not provided.")
 		flag.Usage()
@@ -92,9 +111,21 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	ircFS = fs.NewFS("glenda", "glenda", 0555)
+	ctlStream := fs.NewBlockingStream(10, true)
+	ircFS.Root.AddChild(
+		fs.NewStreamFile(
+			ircFS.NewStat("ctl", "glenda", "glenda", 0666),
+			ctlStream,
+		),
+	)
+
+	setupStreams()
+
 	msgs := make(chan outgoing, 10)
-	raw := rawFile()
-	ircobj := irc.IRC("testclient2", "jack_rabbit") //Create new ircobj
+	raw := getFile("raw")
+	ircobj := irc.IRC(*nick, *user) //Create new ircobj
 	ircobj.VerboseCallbackHandler = true
 	ircobj.Log = verboseLog()
 	ircobj.UseTLS = true //default is false
@@ -124,9 +155,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go listener(msgs)
+	go listener9p(ctlStream, msgs)
 	go handleOutgoing(ircobj, msgs)
-	ircobj.Loop()
+	go ircobj.Loop()
+	log.Println(go9p.PostSrv("9irc", ircFS.Server()))
+}
+
+func listener9p(s fs.BiDiStream, msgs chan<- outgoing) {
+	scanner := bufio.NewScanner(s)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text()) // Println will add back the final '\n'
+		s.Write([]byte(fmt.Sprintf("Got: [%s]\n", scanner.Text())))
+		out, err := parseIncoming(scanner.Text())
+		if err != nil {
+			s.Write([]byte(fmt.Sprintf("%s\n", err)))
+			continue
+		}
+		select {
+		case msgs <- out:
+		default:
+		}
+		s.Write([]byte(fmt.Sprintf("%#v\n", out)))
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "reading standard input:", err)
+	}
 }
 
 func parseIncoming(in string) (o outgoing, e error) {
