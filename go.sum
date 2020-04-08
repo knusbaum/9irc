@@ -1,4 +1,6 @@
 9fans.net/go v0.0.2/go.mod h1:lfPdxjq9v8pVQXUMBCx5EO5oLXWQFlKRQgs1kEkjoIM=
+github.com/Plan9-Archive/libauth v0.0.0-20180917063427-d1ca9e94969d h1:xH/U6K+HYxh1480TkQYRqRO8F2RJsg+R6wFiVJzdldg=
+github.com/Plan9-Archive/libauth v0.0.0-20180917063427-d1ca9e94969d/go.mod h1:UKp8dv9aeaZoQFWin7eQXtz89iHly1YAFZNn3MCutmQ=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fhs/mux9p v0.2.0/go.mod h1:tjbHDrV79hmPQZ5kZ5Lu5ggNPNFe6MGAldApF+ynYy8=
 github.com/knusbaum/go-ircevent v0.0.0-20190807115034-8e7ce4b5a1eb h1:9DhIqbuF0jsw/GBG6L5L6wpCl6SQQEX9UOdmFgUQ+XQ=
@@ -9,6 +11,8 @@ github.com/knusbaum/go-ircevent v0.0.0-20200327234106-6ade69379f3b h1:i2lYodnK1H
 github.com/knusbaum/go-ircevent v0.0.0-20200327234106-6ade69379f3b/go.mod h1:I0ZT9x8wStY6VOxtNOrLpnDURFs7HS0z1e1vhuKUEVc=
 github.com/knusbaum/go9p v1.3.0 h1:DfNH931E7/lOqbsYuQxm6YUakhO/Rw9QnYidtmJ41Dc=
 github.com/knusbaum/go9p v1.3.0/go.mod h1:fhHqrfb3VbeB0jDR98mkC3HCJl+VeFIafnVhg2rrPrA=
+github.com/knusbaum/go9p v1.5.0 h1:azAAugdov4/JMrXXJbXKkWnY9is9ji55LEmpOJWuQq0=
+github.com/knusbaum/go9p v1.5.0/go.mod h1:QIQCvpV1Gcyg8N4+jUqIdFFV0131V2TKSEkvxjYsbmI=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=

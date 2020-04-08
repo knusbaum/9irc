@@ -90,6 +90,7 @@ func main() {
 	user := flag.String("user", username, "the username to log into the server with.")
 	server := flag.String("server", "chat.freenode.net:6697", "address (host and port) of the IRC server to connect to.")
 	service := flag.String("svc", "9irc", "sets the service name that the 9p connection will be posted as. This will also change the log directory to /tmp/[svc] unless it is set with the dir flag.")
+	auth := flag.Bool("auth", false, "This flag controls whether 9irc will require clients to authenticate oven 9p.")
 	flag.Parse()
 
 	dir = "/tmp/" + *service
@@ -112,7 +113,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ircFS = fs.NewFS("glenda", "glenda", 0555)
+	if *auth {
+		ircFS = fs.NewFS("glenda", "glenda", 0555, fs.WithAuth())
+	} else {
+		ircFS = fs.NewFS("glenda", "glenda", 0555)
+	}
 	ctlStream := fs.NewBlockingStream(10, true)
 	ircFS.Root.AddChild(
 		fs.NewStreamFile(
@@ -129,14 +134,13 @@ func main() {
 	ircobj.VerboseCallbackHandler = true
 	ircobj.Log = verboseLog()
 	ircobj.UseTLS = true //default is false
-	//	ircobj.AddCallback("001", func(e *irc.Event) {
-	//		ircobj.Join("##client.test.1")
-	//		go listener(msgs)
-	//		go handleOutgoing(ircobj, msgs)
-	//	})
-	//	ircobj.AddCallback("366", func(e *irc.Event) {
-	//		fmt.Printf("Event: %#v\n", e)
-	//	})
+	ircobj.AddCallback("001", func(e *irc.Event) {
+		for k := range streams {
+			if strings.HasPrefix(k, "#") {
+				ircobj.Join(k)
+			}
+		}
+	})
 	ircobj.AddCallback("PRIVMSG", func(e *irc.Event) {
 		channel := e.Arguments[0]
 		f := getFile(channel)
