@@ -7,10 +7,10 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/user"
 	"strings"
 	"time"
 
+	"github.com/Plan9-Archive/libauth"
 	"github.com/knusbaum/go9p"
 	"github.com/knusbaum/go9p/fs"
 	"github.com/thoj/go-ircevent"
@@ -79,21 +79,17 @@ func setupStreams() {
 }
 
 func main() {
-	var username string
-	u, err := user.Current()
-	if err == nil {
-		username = u.Username
-	}
-
 	dirFlag := flag.String("dir", "", "specifies the directory to which 9irc will log irc messages. (default \"/tmp/9irc\")")
 	nick := flag.String("nick", "", "the nick that will be used.")
-	user := flag.String("user", username, "the username to log into the server with.")
+	user := flag.String("user", "", "the username to log into the server with. By default, it is the same as nick.")
 	server := flag.String("server", "chat.freenode.net:6697", "address (host and port) of the IRC server to connect to.")
 	service := flag.String("svc", "9irc", "sets the service name that the 9p connection will be posted as. This will also change the log directory to /tmp/[svc] unless it is set with the dir flag.")
 	auth := flag.Bool("auth", false, "This flag controls whether 9irc will require clients to authenticate oven 9p.")
+	pass := flag.Bool("p", false, "causes a password to be sent to the server. Password will be read from factotum.")
 	flag.Parse()
 
 	dir = "/tmp/" + *service
+	uname := *nick
 	if *dirFlag != "" {
 		dir = *dirFlag
 	}
@@ -102,13 +98,11 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	if *user == "" {
-		log.Print("user not provided.")
-		flag.Usage()
-		os.Exit(1)
+	if *user != "" {
+		uname = *user
 	}
 
-	err = os.MkdirAll(dir, os.ModeDir|0775)
+	err := os.MkdirAll(dir, os.ModeDir|0775)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -130,10 +124,19 @@ func main() {
 
 	msgs := make(chan outgoing, 10)
 	raw := getFile("raw")
-	ircobj := irc.IRC(*nick, *user) //Create new ircobj
+	ircobj := irc.IRC(*nick, uname) //Create new ircobj
 	ircobj.VerboseCallbackHandler = true
 	ircobj.Log = verboseLog()
 	ircobj.UseTLS = true //default is false
+
+	if *pass {
+		pw, err := libauth.Getuserpasswd("proto=pass service=irc server=%s user=%s", *server, uname)
+		if err != nil {
+			log.Fatal(err)
+		}
+		ircobj.Password = pw.Password
+	}
+
 	ircobj.AddCallback("001", func(e *irc.Event) {
 		for k := range streams {
 			if strings.HasPrefix(k, "#") {
@@ -143,6 +146,10 @@ func main() {
 	})
 	ircobj.AddCallback("PRIVMSG", func(e *irc.Event) {
 		channel := e.Arguments[0]
+		if channel == ircobj.GetNick() {
+			// This is a private message. The channel should be the source nick.
+			channel = e.Nick
+		}
 		f := getFile(channel)
 		f.Write([]byte(fmt.Sprintf("[%s] %s: %s\n", time.Now().Format("01/02 03:04PM"), e.Nick, e.Arguments[1])))
 	})
