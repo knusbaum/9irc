@@ -112,7 +112,7 @@ func main() {
 	} else {
 		ircFS = fs.NewFS("glenda", "glenda", 0555)
 	}
-	ctlStream := fs.NewBlockingStream(10, true)
+	ctlStream := fs.NewSkippingStream(10)
 	ircFS.Root.AddChild(
 		fs.NewStreamFile(
 			ircFS.NewStat("ctl", "glenda", "glenda", 0666),
@@ -169,27 +169,27 @@ func main() {
 	go listener9p(ctlStream, msgs)
 	go handleOutgoing(ircobj, msgs)
 	go ircobj.Loop()
-	log.Println(go9p.PostSrv("9irc", ircFS.Server()))
+	log.Println(go9p.Serve("0.0.0.0:9900", ircFS.Server()))
 }
 
 func listener9p(s fs.BiDiStream, msgs chan<- outgoing) {
 	scanner := bufio.NewScanner(s)
 	for scanner.Scan() {
-		fmt.Println(scanner.Text()) // Println will add back the final '\n'
-		s.Write([]byte(fmt.Sprintf("Got: [%s]\n", scanner.Text())))
+		log.Printf("CTL Recieved: %s", scanner.Text())
 		out, err := parseIncoming(scanner.Text())
 		if err != nil {
-			s.Write([]byte(fmt.Sprintf("%s\n", err)))
+			s.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
 			continue
 		}
 		select {
 		case msgs <- out:
 		default:
 		}
-		s.Write([]byte(fmt.Sprintf("%#v\n", out)))
+		log.Printf(fmt.Sprintf("MSG: %#v\n", out))
+		s.Write([]byte(fmt.Sprintf("MSG: %#v\n", out)))
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading standard input:", err)
+		log.Printf("reading CTL:", err)
 	}
 }
 
