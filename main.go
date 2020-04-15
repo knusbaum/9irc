@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"net"
 
 	"github.com/Plan9-Archive/libauth"
 	"github.com/knusbaum/go9p"
@@ -86,6 +87,7 @@ func main() {
 	service := flag.String("svc", "9irc", "sets the service name that the 9p connection will be posted as. This will also change the log directory to /tmp/[svc] unless it is set with the dir flag.")
 	auth := flag.Bool("auth", false, "This flag controls whether 9irc will require clients to authenticate oven 9p.")
 	pass := flag.Bool("p", false, "causes a password to be sent to the server. Password will be read from factotum.")
+	bindPort := flag.String("port", "9900", "this is the port that 9irc will bind its 9p connection to.")
 	flag.Parse()
 
 	dir = "/tmp/" + *service
@@ -102,7 +104,17 @@ func main() {
 		uname = *user
 	}
 
-	err := os.MkdirAll(dir, os.ModeDir|0775)
+	host, port, err := net.SplitHostPort(*server)
+	if err != nil || host == "" || port == "" {
+		log.Print("Need server to specify host and port")
+		if err != nil {
+			log.Print(err)
+		}
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	err = os.MkdirAll(dir, os.ModeDir|0775)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -130,7 +142,7 @@ func main() {
 	ircobj.UseTLS = true //default is false
 
 	if *pass {
-		pw, err := libauth.Getuserpasswd("proto=pass service=irc server=%s user=%s", *server, uname)
+		pw, err := libauth.Getuserpasswd("proto=pass service=irc server=%s user=%s", host, uname)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -169,27 +181,34 @@ func main() {
 	go listener9p(ctlStream, msgs)
 	go handleOutgoing(ircobj, msgs)
 	go ircobj.Loop()
-	log.Println(go9p.Serve("0.0.0.0:9900", ircFS.Server()))
+	log.Println(go9p.Serve("127.0.0.1:" + *bindPort, ircFS.Server()))
 }
 
 func listener9p(s fs.BiDiStream, msgs chan<- outgoing) {
+	defer s.Close()
 	scanner := bufio.NewScanner(s)
 	for scanner.Scan() {
-		log.Printf("CTL Recieved: %s", scanner.Text())
+		log.Printf("[listener9p] CTL Recieved: %s", scanner.Text())
 		out, err := parseIncoming(scanner.Text())
 		if err != nil {
+			log.Printf("[listener9p] SENDING Error: %s", err)
 			s.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+			log.Printf("[listener9p] SENT Error")
 			continue
 		}
 		select {
 		case msgs <- out:
+			log.Printf("[listener9p] SENDING MSG: %#v\n", out)
+			s.Write([]byte(fmt.Sprintf("MSG: %#v\n", out)))
+			log.Printf("[listener9p] SENT MSG")
 		default:
+			log.Printf("[listener9p] SENDING msgs full. Failed to send msg: %#v\n", out)
+			s.Write([]byte(fmt.Sprintf("MSG: %#v\n", out)))
+			log.Printf("[listener9p] SENT MSG")
 		}
-		log.Printf(fmt.Sprintf("MSG: %#v\n", out))
-		s.Write([]byte(fmt.Sprintf("MSG: %#v\n", out)))
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("reading CTL:", err)
+		log.Printf("[listener9p] FATAL ERROR reading CTL: %s", err)
 	}
 }
 
